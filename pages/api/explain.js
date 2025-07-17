@@ -1,6 +1,7 @@
 import { IncomingForm } from 'formidable';
 import fs from 'fs';
 import path from 'path';
+console.log('Loaded Gemini API Key:', process.env.GEMINI_API_KEY)
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import pdfParse from 'pdf-parse';
 import { createWorker } from 'tesseract.js';
@@ -27,9 +28,11 @@ const countryNames = {
 
 async function extractTextFromPDF(filePath) {
   try {
+    console.log('Extracting text from PDF:', filePath);
     const data = await pdfParse(fs.readFileSync(filePath));
     if (data.text.trim().length > 50) return data.text;
 
+    console.log('PDF parse too short, running OCR...');
     const worker = await createWorker();
     await worker.loadLanguage('eng');
     await worker.initialize('eng');
@@ -62,6 +65,9 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Form parsing failed' });
     }
 
+    console.log('FIELDS:', fields);
+    console.log('FILES:', files);
+
     const uploadedFile = files.file?.[0] || Object.values(files)[0];
     const language = fields.language?.[0] || 'en';
     const countryCode = fields.country?.[0] || 'US';
@@ -69,13 +75,28 @@ export default async function handler(req, res) {
     const state = countryCode === 'US' ? fields.state?.[0] || '' : '';
     const location = state ? `${state}, ${country}` : country;
 
-    if (!uploadedFile?.filepath) {
+    if (!uploadedFile) {
+      console.error('No uploaded file found');
       return res.status(400).json({ summary: 'No file was uploaded', rights: '' });
     }
 
+    const filePath = uploadedFile.filepath || uploadedFile.path;
+    console.log('Uploaded file path:', filePath);
+
+    if (!filePath) {
+      console.error('Uploaded file path is undefined');
+      return res.status(400).json({ summary: 'Uploaded file path missing', rights: '' });
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+      console.error('GEMINI_API_KEY is missing');
+      return res.status(500).json({ summary: 'Server configuration error', rights: '' });
+    }
+
     try {
-      const fileContent = await extractTextFromPDF(uploadedFile.filepath);
+      const fileContent = await extractTextFromPDF(filePath);
       if (!fileContent) {
+        console.error('No text extracted from document');
         return res.status(400).json({ summary: 'Could not read document text', rights: '' });
       }
 
@@ -93,9 +114,18 @@ Document:
 ${fileContent}
 """`;
 
+      console.log('Sending prompt to Gemini API...');
       const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
+
+      if (!result || !result.response) {
+        console.error('No valid response from Gemini API:', result);
+        throw new Error('Invalid Gemini API response');
+      }
+
+      console.log('Gemini API response received');
+
+      const text = result.response.text();
+      console.log('Raw Gemini API text:', text);
 
       const summary = text.includes('[Summary]')
         ? text.split('[Summary]')[1]?.split('[Your Rights]')[0]?.trim()
@@ -105,7 +135,7 @@ ${fileContent}
         ? text.split('[Your Rights]')[1]?.trim()
         : 'General legal protections apply';
 
-      fs.unlink(uploadedFile.filepath, () => {});
+      fs.unlink(filePath, () => {});
 
       return res.status(200).json({
         summary: summary?.replace(/\n/g, ' ') || 'No summary generated',
@@ -114,7 +144,7 @@ ${fileContent}
 
     } catch (error) {
       console.error('Processing error:', error);
-      if (uploadedFile?.filepath) fs.unlink(uploadedFile.filepath, () => {});
+      if (filePath) fs.unlink(filePath, () => {});
       return res.status(500).json({
         summary: 'Error processing document',
         rights: 'Error retrieving rights information'
