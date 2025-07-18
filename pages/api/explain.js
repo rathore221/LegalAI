@@ -1,7 +1,7 @@
 import { IncomingForm } from 'formidable';
 import fs from 'fs';
 import path from 'path';
-console.log('Loaded Gemini API Key:', process.env.NEXT_PUBLIC_GEMINI_API_KEY)
+console.log('Loaded Gemini API Key:', process.env.NEXT_PUBLIC_GEMINI_API_KEY);
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import pdfParse from 'pdf-parse';
 import { createWorker } from 'tesseract.js';
@@ -101,45 +101,37 @@ export default async function handler(req, res) {
       }
 
       const genAI = new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-      const prompt = `You are a legal expert analyzing this document for someone in ${location}.
-Provide the response in ${languages[language] || 'English'}.
-
-1. [Summary] A concise plain language explanation (3-4 sentences)
-2. [Your Rights] List relevant rights in bullet points
+      console.log('Generating summary...');
+      const summaryPrompt = `You are a legal expert. Summarize the following document in plain language (3-4 sentences) for someone in ${location}. Provide the response in ${languages[language] || 'English'}.
 
 Document:
 """
 ${fileContent}
 """`;
 
-      console.log('Sending prompt to Gemini API...');
-      const result = await model.generateContent(prompt);
+      const summaryResult = await model.generateContent(summaryPrompt);
+      const summaryText = summaryResult?.response?.text()?.trim() || 'No summary generated';
+      console.log('Summary generated:', summaryText);
 
-      if (!result || !result.response) {
-        console.error('No valid response from Gemini API:', result);
-        throw new Error('Invalid Gemini API response');
-      }
+      console.log('Generating rights...');
+      const rightsPrompt = `You are a legal expert. List the relevant legal rights for someone in ${location} based on the following document. Provide the response in ${languages[language] || 'English'}, formatted as bullet points.
 
-      console.log('Gemini API response received');
+Document:
+"""
+${fileContent}
+"""`;
 
-      const text = result.response.text();
-      console.log('Raw Gemini API text:', text);
-
-      const summary = text.includes('[Summary]')
-        ? text.split('[Summary]')[1]?.split('[Your Rights]')[0]?.trim()
-        : text.split('\n')[0]?.trim();
-
-      const rights = text.includes('[Your Rights]')
-        ? text.split('[Your Rights]')[1]?.trim()
-        : 'General legal protections apply';
+      const rightsResult = await model.generateContent(rightsPrompt);
+      const rightsText = rightsResult?.response?.text()?.trim()?.replace(/\n/g, '<br>') || 'No rights information';
+      console.log('Rights generated:', rightsText);
 
       fs.unlink(filePath, () => {});
 
       return res.status(200).json({
-        summary: summary?.replace(/\n/g, ' ') || 'No summary generated',
-        rights: rights?.replace(/\n/g, '<br>') || 'No rights information'
+        summary: summaryText.replace(/\n/g, ' '),
+        rights: rightsText
       });
 
     } catch (error) {
