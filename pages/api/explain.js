@@ -1,7 +1,7 @@
 import { IncomingForm } from 'formidable';
 import fs from 'fs';
 import path from 'path';
-console.log('Loaded Gemini API Key:', process.env.GEMINI_API_KEY)
+console.log('Loaded Gemini API Key:', process.env.NEXT_PUBLIC_GEMINI_API_KEY)
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import pdfParse from 'pdf-parse';
 import { createWorker } from 'tesseract.js';
@@ -88,7 +88,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ summary: 'Uploaded file path missing', rights: '' });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
+    if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
       console.error('GEMINI_API_KEY is missing');
       return res.status(500).json({ summary: 'Server configuration error', rights: '' });
     }
@@ -100,7 +100,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ summary: 'Could not read document text', rights: '' });
       }
 
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+      const genAI = new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY);
       const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
       const prompt = `You are a legal expert analyzing this document for someone in ${location}.
